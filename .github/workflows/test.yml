@@ -18,6 +18,8 @@ jobs:
         with:
           path: homebrew-tap
 
+      - uses: Homebrew/actions/setup-homebrew@master
+
       - name: Link the checkout as a local tap
         run: |
           TAP="$(brew --repository)/Library/Taps/device-link/homebrew-tap"
