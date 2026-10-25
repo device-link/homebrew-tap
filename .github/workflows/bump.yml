@@ -1,0 +1,75 @@
+name: bump
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to pin, or empty for the current npm latest
+        required: false
+  repository_dispatch:
+    types: [npm-publish]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+      DISPATCH_VERSION: ${{ github.event.client_payload.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the target version
+        id: resolve
+        run: |
+          set -eu
+          WANT="${INPUT_VERSION:-${DISPATCH_VERSION:-}}"
+          if [ -z "$WANT" ]; then
+            WANT=$(curl -fsSL https://registry.npmjs.org/@devicelink/dlink \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)["dist-tags"].latest))')
+          fi
+          case "$WANT" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "refusing a version that is not semver: $WANT" >&2; exit 1 ;;
+          esac
+          HAVE=$(sed -n 's|.*/dlink-\(.*\)\.tgz".*|\1|p' Formula/dlink.rb)
+          echo "want=$WANT" >> "$GITHUB_OUTPUT"
+          echo "have=$HAVE" >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite the formula
+        if: steps.resolve.outputs.want != steps.resolve.outputs.have
+        env:
+          WANT: ${{ steps.resolve.outputs.want }}
+        run: |
+          set -eu
+          URL="https://registry.npmjs.org/@devicelink/dlink/-/dlink-$WANT.tgz"
+          curl -fsSL "$URL" -o pkg.tgz
+          SHA=$(shasum -a 256 pkg.tgz | cut -d' ' -f1)
+          rm -f pkg.tgz
+          sed -i "s|^  url \".*\"$|  url \"$URL\"|" Formula/dlink.rb
+          sed -i "s|^  sha256 \".*\"$|  sha256 \"$SHA\"|" Formula/dlink.rb
+          grep -q "dlink-$WANT.tgz" Formula/dlink.rb
+          grep -q "$SHA" Formula/dlink.rb
+
+      - name: Open a pull request
+        if: steps.resolve.outputs.want != steps.resolve.outputs.have
+        env:
+          WANT: ${{ steps.resolve.outputs.want }}
+          HAVE: ${{ steps.resolve.outputs.have }}
+        run: |
+          set -eu
+          BRANCH="bump-dlink-$WANT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git commit -am "dlink $WANT"
+          git push -u origin "$BRANCH" --force
+          gh pr create --fill --title "dlink $HAVE -> $WANT" \
+            --body "Automated bump to @devicelink/dlink@$WANT. Merge once the macOS and Linux jobs pass." \
+            || gh pr edit "$BRANCH" --title "dlink $HAVE -> $WANT"

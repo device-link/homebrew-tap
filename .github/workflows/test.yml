@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  formula:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-13, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: homebrew-tap
+
+      - name: Link the checkout as a local tap
+        run: |
+          TAP="$(brew --repository)/Library/Taps/device-link/homebrew-tap"
+          mkdir -p "$(dirname "$TAP")"
+          ln -s "$GITHUB_WORKSPACE/homebrew-tap" "$TAP"
+
+      - name: Audit
+        run: brew audit --strict --online device-link/tap/dlink
+
+      - name: Install from source
+        run: brew install --build-from-source device-link/tap/dlink
+
+      - name: Formula test block
+        run: brew test device-link/tap/dlink
+
+      - name: Launcher runs
+        run: dlink --version
+
+      - name: Uninstall cleanly
+        run: brew uninstall device-link/tap/dlink
