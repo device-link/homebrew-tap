@@ -18,7 +18,7 @@ jobs:
         with:
           path: homebrew-tap
 
-      - uses: Homebrew/actions/setup-homebrew@master
+      - uses: Homebrew/actions/setup-homebrew@main
 
       - name: Link the checkout as a local tap
         run: |
